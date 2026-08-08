@@ -1,39 +1,29 @@
-"""Constants for the Summit Control integration."""
+"""Constants for the Summit Control (Sierra) integration."""
 from __future__ import annotations
 
 from typing import Final
 
 DOMAIN: Final = "summit_control"
 
-# --- Cloud API (Security Brands "SnapApi", recovered from the official app) ---
-BASE_URL: Final = "https://summitcontrol.com/SnapApi/index.php/"
-# Match the official app's client string; some hosting front-ends are picky about UA.
-USER_AGENT: Final = "okhttp/3.12.1"
+# Sierra platform hosts (reverse-engineered + confirmed live).
+IDENTITY_BASE: Final = "https://ip-lib.summitcontrol.com:4000"   # /login, /refresh-token
+API_BASE: Final = "https://sierra-lib.summitcontrol.com:3000"    # /v1/... REST API
 
-EP_LOGIN: Final = "auth/login"
-EP_LOGOUT: Final = "auth/logout"
-EP_DASHBOARD: Final = "user/dashboard"
-EP_ACTIONS_OPEN: Final = "Actions/Open"
-EP_LATCH_OPEN: Final = "Latch/Open"
-EP_LATCH_CLOSE: Final = "Latch/Close"
-EP_RELAY_STATUS: Final = "Actions/RelayStatus"
+# Endpoints (paths under API_BASE).
+EP_SHELL_BY_USER: Final = "/v1/shell/get_by_user"
+EP_GROUP_PERMISSIONS: Final = "/v1/user_group_permission/get/all"
+EP_DEVICES_BY_IDS: Final = "/v1/device/get/ids"
+EP_RESOURCES_BY_IDS: Final = "/v1/device_resource/get/all_by_ids"
+EP_COMMAND: Final = "/v1/command/"  # + action, e.g. "open"
 
-GRANT_TYPE: Final = "client_credentials"
-REQUEST_TIMEOUT: Final = 30  # seconds
+REQUEST_TIMEOUT: Final = 30
+# The access token is a JWT with a ~120 s lifetime; refresh this many seconds early.
+TOKEN_REFRESH_MARGIN: Final = 30
+DEFAULT_TOKEN_TTL: Final = 110
 
-# --- Options ---
-CONF_COMMAND_MODE: Final = "command_mode"
-MODE_AUTO: Final = "auto"          # detect from reported relay status
-MODE_LATCH: Final = "latch"        # maintained relay: Latch/Open + Latch/Close, real state
-MODE_MOMENTARY: Final = "momentary"  # single pulse: Actions/Open, optimistic state
-COMMAND_MODES: Final = [MODE_AUTO, MODE_LATCH, MODE_MOMENTARY]
+# Gates rarely change and there is no live open/closed state to poll, so the
+# coordinator polls slowly — mainly to keep auth warm and pick up gate changes.
+DEFAULT_SCAN_INTERVAL: Final = 300
+MIN_SCAN_INTERVAL: Final = 60
 
-DEFAULT_SCAN_INTERVAL: Final = 30    # seconds
-MIN_SCAN_INTERVAL: Final = 10
-
-# Token is refreshed this many seconds before its stated expiry.
-TOKEN_EXPIRY_MARGIN: Final = 60
-
-# Relay status string values seen in the app (case-insensitive match).
-RELAY_OPEN_VALUES: Final = frozenset({"on", "open", "1", "opened", "unlatched"})
-RELAY_CLOSED_VALUES: Final = frozenset({"off", "close", "closed", "0", "latched"})
+MANUFACTURER: Final = "Security Brands, Inc."

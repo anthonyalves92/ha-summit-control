@@ -32,11 +32,10 @@
       "init": {
         "title": "Summit Control options",
         "data": {
-          "scan_interval": "Polling interval (seconds)",
-          "command_mode": "Command mode"
+          "scan_interval": "Polling interval (seconds)"
         },
         "data_description": {
-          "command_mode": "auto = detect from the reported relay status; latch = maintained relay (Latch/Open + Latch/Close, real state); momentary = single Actions/Open pulse (optimistic state)."
+          "scan_interval": "How often to re-check your gate list and keep the session alive. Gates have no live open/closed state, so this can be infrequent."
         }
       }
     }
