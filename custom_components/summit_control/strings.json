@@ -1,0 +1,44 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Summit Control",
+        "description": "Sign in with your Summit Control app username and password.",
+        "data": {
+          "username": "Username",
+          "password": "Password"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Summit Control",
+        "description": "Enter the password for {username} again.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the Summit Control cloud.",
+      "invalid_auth": "Invalid username or password.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This Summit Control account is already set up.",
+      "reauth_successful": "Re-authentication was successful."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Summit Control options",
+        "data": {
+          "scan_interval": "Polling interval (seconds)",
+          "command_mode": "Command mode"
+        },
+        "data_description": {
+          "command_mode": "auto = detect from the reported relay status; latch = maintained relay (Latch/Open + Latch/Close, real state); momentary = single Actions/Open pulse (optimistic state)."
+        }
+      }
+    }
+  }
+}

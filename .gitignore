@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Local secrets / captures (never commit)
+*.env
+.env
+secrets.*
+*.apk
+*.xapk
