@@ -88,6 +88,6 @@ class SummitGateCover(CoordinatorEntity[SummitCoordinator], CoverEntity):
     async def async_open_cover(self, **kwargs: Any) -> None:
         gate = self._gate
         try:
-            await self.coordinator.client.async_open_gate(gate.device_id, gate.resource_id)
+            await self.coordinator.client.async_open_gate(gate)
         except SummitError as err:
             raise HomeAssistantError(f"Failed to open {gate.name}: {err}") from err

@@ -13,10 +13,11 @@ confirmed live. Flow:
         POST /v1/shell/get_by_user           {user_id}      -> user_group_id(s)
         POST /v1/user_group_permission/get/all {user_group_id} -> device_id + relay
                                                                   resource_ids + actions
-        POST /v1/device/get/ids              {device_ids}   -> device names
-        POST /v1/device_resource/get/all_by_ids {resource_ids} -> relay names
-  5. Open a gate:
-        POST /v1/command/open                {device, resource, user}
+        POST /v1/device/get/ids              {device_ids}   -> device OBJECTS
+        POST /v1/device_resource/get/all_by_ids {resource_ids} -> relay OBJECTS
+  5. Open a gate — the server wants the FULL OBJECTS, not id strings:
+        POST /v1/command/open  {device: <device obj>, resource: <relay obj>,
+                                user: <user obj incl. user_group_id>}
 
 A dedicated aiohttp session with its own cookie jar is used (not HA's shared
 session) because the refresh flow relies on the identity cookies.
@@ -28,7 +29,7 @@ import binascii
 import json
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import aiohttp
@@ -61,15 +62,22 @@ class SummitConnectionError(SummitError):
     """Network/transport problem talking to the Sierra cloud."""
 
 
-@dataclass(frozen=True)
+@dataclass
 class Gate:
-    """One openable relay resource on a device the user has access to."""
+    """One openable relay on a device the user has access to.
+
+    Carries the full device/resource objects because the open command sends the
+    objects verbatim (not id strings), plus the user_group_id that authorizes it.
+    """
 
     device_id: str
     resource_id: str
     name: str
     device_name: str
     device_type: str
+    user_group_id: str
+    device_obj: dict[str, Any] = field(repr=False, default_factory=dict)
+    resource_obj: dict[str, Any] = field(repr=False, default_factory=dict)
 
     @property
     def unique_id(self) -> str:
@@ -96,7 +104,7 @@ class SummitClient:
         self._session: aiohttp.ClientSession | None = None
         self._access_token: str | None = None
         self._token_expiry: float = 0.0
-        self._user_id: str | None = None
+        self._user: dict[str, Any] | None = None
 
     # -------------------------------------------------------------- session
     def _get_session(self) -> aiohttp.ClientSession:
@@ -111,6 +119,10 @@ class SummitClient:
         if self._session is not None and not self._session.closed:
             await self._session.close()
         self._session = None
+
+    @property
+    def _user_id(self) -> str | None:
+        return self._user.get("_id") if self._user else None
 
     # ----------------------------------------------------------------- auth
     async def async_login(self) -> dict[str, Any]:
@@ -136,7 +148,7 @@ class SummitClient:
         if not token or not user.get("_id"):
             raise SummitAuthError("Login response missing access_token/user")
         self._set_token(token)
-        self._user_id = user["_id"]
+        self._user = user
         return user
 
     async def async_refresh(self) -> None:
@@ -160,7 +172,7 @@ class SummitClient:
         self._token_expiry = exp if exp is not None else time.time() + DEFAULT_TOKEN_TTL
 
     async def _ensure_token(self) -> None:
-        if self._access_token is None or self._user_id is None:
+        if self._access_token is None or self._user is None:
             await self.async_login()
         elif time.time() >= self._token_expiry - TOKEN_REFRESH_MARGIN:
             await self.async_refresh()
@@ -196,15 +208,13 @@ class SummitClient:
         assert self._user_id is not None
 
         shells = await self._api("POST", EP_SHELL_BY_USER, {"user_id": self._user_id})
-        group_ids = {
-            s.get("user_group_id")
-            for s in _as_list(shells)
-            if s.get("user_group_id")
-        }
 
-        # Collect (device_id, resource_id) pairs the user may open.
-        pairs: list[tuple[str, str]] = []
-        for gid in group_ids:
+        # Each (device_id, resource_id) tagged with the group that authorizes it.
+        pairs: list[tuple[str, str, str]] = []
+        for shell in _as_list(shells):
+            gid = shell.get("user_group_id")
+            if not gid:
+                continue
             perms = await self._api("POST", EP_GROUP_PERMISSIONS, {"user_group_id": gid})
             for perm in _as_list(perms):
                 device_id = perm.get("device_id")
@@ -214,23 +224,26 @@ class SummitClient:
                 for relay in perm.get("relays") or []:
                     rid = relay.get("resource_id") if isinstance(relay, dict) else None
                     if rid:
-                        pairs.append((device_id, rid))
+                        pairs.append((device_id, rid, gid))
 
-        # Dedupe while preserving order.
+        # Dedupe on (device, resource) while keeping the first group.
         seen: set[tuple[str, str]] = set()
-        pairs = [p for p in pairs if not (p in seen or seen.add(p))]
+        pairs = [t for t in pairs if not ((t[0], t[1]) in seen or seen.add((t[0], t[1])))]
         if not pairs:
             return []
 
-        device_ids = list({d for d, _ in pairs})
-        resource_ids = [r for _, r in pairs]
+        device_ids = list({d for d, _, _ in pairs})
+        resource_ids = [r for _, r, _ in pairs]
         devices = _index(await self._api("POST", EP_DEVICES_BY_IDS, {"device_ids": device_ids}))
         resources = _index(await self._api("POST", EP_RESOURCES_BY_IDS, {"resource_ids": resource_ids}))
 
         gates: list[Gate] = []
-        for device_id, resource_id in pairs:
+        for device_id, resource_id, gid in pairs:
             dev = devices.get(device_id, {})
-            res = resources.get(resource_id, {})
+            res = dict(resources.get(resource_id, {}))
+            # The app sends the "favorite" resource object, which carries these flags.
+            res.setdefault("open", True)
+            res.setdefault("toggle", False)
             gates.append(
                 Gate(
                     device_id=device_id,
@@ -238,18 +251,24 @@ class SummitClient:
                     name=res.get("name") or "Gate",
                     device_name=dev.get("name") or "Summit Control",
                     device_type=dev.get("type") or "",
+                    user_group_id=gid,
+                    device_obj=dev,
+                    resource_obj=res,
                 )
             )
         return gates
 
     # ------------------------------------------------------------- commands
-    async def async_open_gate(self, device_id: str, resource_id: str) -> None:
-        """Fire the momentary open relay for one gate."""
+    async def async_open_gate(self, gate: Gate) -> None:
+        """Fire the momentary open relay for one gate.
+
+        The server expects the full device/resource/user objects, and the user
+        object must carry the authorizing user_group_id.
+        """
         await self._ensure_token()
-        payload = {"device": device_id, "resource": resource_id, "user": self._user_id}
-        data = await self._api("POST", f"{EP_COMMAND}open", payload)
-        if isinstance(data, dict) and data.get("error"):
-            raise SummitError(f"open command rejected: {data.get('message')}")
+        user_obj = {**(self._user or {}), "user_group_id": gate.user_group_id}
+        payload = {"device": gate.device_obj, "resource": gate.resource_obj, "user": user_obj}
+        await self._api("POST", f"{EP_COMMAND}open", payload)
 
 
 def _loads(body: str) -> Any:
